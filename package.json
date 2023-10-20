@@ -1,4 +1,5 @@
 {
+  "name": "ReYANG",
   "main": "app.js",
   "version": "3.3.4",
   "dependencies": {
