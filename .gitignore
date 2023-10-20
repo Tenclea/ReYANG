@@ -1,0 +1,8 @@
+dist
+node_modules
+.eslintrc.json
+.dccache
+*.bak
+
+valid_codes.txt
+working_proxies.txt
