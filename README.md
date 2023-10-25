@@ -1,5 +1,5 @@
 <h1 align="center">🔥 ReYANG: Yet Another Nitro Generator - Reborn🚀</h1>
-<h1 align="center">The <a href="https://github.com/Tenclea/YANG">previous repository</a> has been DMCA'd!</br>Be aware of scammers!</h1>
+<h1 align="center"><a href="https://github.com/Tenclea/YANG">The previous repository has been DMCA'd!</a></br>Be aware of scammers!</h1>
 
 <p align="center">
   <a href="https://github.com/Tenclea/ReYANG/stargazers"><img src="https://img.shields.io/github/stars/Tenclea/ReYANG?style=flat"/></a>
