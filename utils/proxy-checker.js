@@ -24,7 +24,8 @@ module.exports = async (proxies, threads, silent = false) => {
 				rejectUnauthorized: false,
 			}, (err, res, body) => {
 				if (body?.fingerprint) { checked.push(p); }
-				else if (ret < maxRetries) { ret++; }
+
+				if (!body?.fingerprint && ret < maxRetries) { ret++; }
 				else { p = proxies.shift(); ret = 0; }
 
 				if (p) { checkProxy(p, ret); if (!ret) last = +new Date(); }
