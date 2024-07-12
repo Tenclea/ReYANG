@@ -8,7 +8,7 @@ const
 	ProxyAgent = require('proxy-agent'),
 	yaml = require('js-yaml');
 
-const stats = { downloaded_codes: [], threads: 0, startTime: 0, used_codes: [], version: require('./package.json').version, working: 0 };
+const stats = { threads: 0, startTime: 0, used_codes: [], version: require('./package.json').version, working: 0 };
 
 console.clear();
 console.log(chalk.blue(`\u001B[?25l
@@ -47,15 +47,18 @@ process.on('exit', () => { logger.info('Closing YANG... If you liked this projec
 
 (async () => {
 	checkForUpdates();
+
 	if (config.proxies.enable_scrapper) {
 		logger.info('Downloading fresh proxies...');
 
-		let downloaded = await require('./utils/proxy-scrapper')();
-		downloaded = downloaded.slice(0, +config.proxies.max_proxies_download || downloaded.length);
-		proxies = [...new Set(proxies.concat(downloaded))];
+		const downloaded = await require('./utils/proxy-scrapper')();
+		const sliced = downloaded.slice(0, +config.proxies.max_proxies_download || downloaded.length);
 
-		logger.info(`Downloaded ${chalk.yellow(downloaded.length)} proxies.`);
+		proxies = [...new Set(proxies.concat(sliced))];
+
+		logger.info(`Downloaded ${chalk.yellow(sliced.length)} proxies.`);
 	}
+
 	if (!proxies[0]) { logger.error('Could not find any valid proxies. Please make sure to add some in the \'required\' folder.'); process.exit(1); }
 
 	if (config.proxies.enable_checker) proxies = await require('./utils/proxy-checker')(proxies, config.threads);
@@ -64,13 +67,10 @@ process.on('exit', () => { logger.info('Closing YANG... If you liked this projec
 	logger.info(`Loaded ${chalk.yellow(proxies.length)} proxies.`);
 
 	const generateCode = () => {
-		const code_length = { 'short': 16, 'long': 24, 'both': Math.random() > 0.5 ? 16 : 24 }[config.code_length] || 16;
-		const code = Array.apply(0, Array(code_length)).map(() => {
-			return ((charset) => {
-				return charset.charAt(Math.floor(Math.random() * charset.length));
-			})('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789');
-		}).join('');
-		return !stats.used_codes.includes(code) || stats.downloaded_codes.indexOf(code) == -1 ? code : generateCode();
+		const code_length = { 'short': 16, 'long': 24, 'both': Math.random() >= 0.5 ? 16 : 24 }[config.code_length] || 16;
+		return Array.apply(0, Array(code_length)).map(() =>
+			'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'.charAt(Math.floor(Math.random() * 62)),
+		).join('');
 	};
 
 	const checkCode = async (code, proxy, retries = 0) => {
@@ -83,6 +83,7 @@ process.on('exit', () => { logger.info('Closing YANG... If you liked this projec
 			{
 				agent: agent,
 				follow: 10,
+				open_timeout: 10000,
 				response_timeout: 10000,
 				read_timeout: 10000,
 				rejectUnauthorized: false,
