@@ -1,7 +1,7 @@
 {
   "name": "ReYANG",
   "main": "app.js",
-  "version": "3.3.4",
+  "version": "3.3.5",
   "dependencies": {
     "chalk": "^4.1.2",
     "js-yaml": "^4.1.0",
