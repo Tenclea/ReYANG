@@ -18,13 +18,13 @@ module.exports = async (proxies, threads, silent = false) => {
 			needle.get('https://discordapp.com/api/v9/experiments', {
 				agent: agent,
 				follow: 10,
+				open_timeout: 10000,
 				response_timeout: 10000,
 				read_timeout: 5000,
 				rejectUnauthorized: false,
 			}, (err, res, body) => {
-				if (body?.fingerprint) checked.push(p);
-
-				if (checked.indexOf(p) === -1 && ret < maxRetries) { ret++; }
+				if (body?.fingerprint) { checked.push(p); }
+				else if (ret < maxRetries) { ret++; }
 				else { p = proxies.shift(); ret = 0; }
 
 				if (p) { checkProxy(p, ret); if (!ret) last = +new Date(); }
@@ -50,7 +50,7 @@ module.exports = async (proxies, threads, silent = false) => {
 		}
 
 		const done = setInterval(() => {
-			if (threads <= 0) {
+			if (threads <= 0 || new Date() - last > 45 * 1000) {
 				clearInterval(done);
 				complete(checked);
 			}
