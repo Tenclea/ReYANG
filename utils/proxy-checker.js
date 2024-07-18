@@ -1,41 +1,58 @@
 const
+	{ default: axios } = require('axios'),
 	chalk = require('chalk'),
-	{ validateProxies } = require('./functions'),
+	{ validateProxies, getAgentFromURI, getIP } = require('./functions'),
 	logger = require('./logger'),
-	ms = require('ms'),
-	needle = require('needle'),
-	ProxyAgent = require('proxy-agent');
+	ms = require('ms');
 
-module.exports = async (proxies, threads, silent = false) => {
-	const maxRetries = 2;
-	if (threads > proxies.length) threads = proxies.length;
-	if (!silent) logger.info(`Checking ${chalk.yellow(proxies.length)} proxies... This might take up to ${ms((proxies.length * maxRetries * 10000) / threads, { long: true })}.`);
+module.exports = async (proxies, threads, keep_transparent, silent = false) => {
+	const maxRetries = 0;
+	if (!silent) logger.info(`Checking ${chalk.yellow(proxies.length)} proxies... This might take up to ${ms(Math.ceil((proxies.length * (maxRetries + 1) * 10000) / threads), { long: true })}.`);
+
+	const og_ip = keep_transparent ? null : await getIP();
 
 	let last = +new Date();
 	proxies = await new Promise(complete => {
-		const checkProxy = (p, ret = 0) => {
-			const agent = new ProxyAgent(p); agent.timeout = 5000;
-			needle.get('https://discordapp.com/api/v9/experiments', {
-				agent: agent,
-				follow: 10,
-				open_timeout: 10000,
-				response_timeout: 10000,
-				read_timeout: 5000,
-				rejectUnauthorized: false,
-			}, (err, res, body) => {
-				if (body?.fingerprint) { checked.push(p); }
+		const checked = [];
 
-				if (!body?.fingerprint && ret < maxRetries) { ret++; }
-				else { p = proxies.shift(); ret = 0; }
+		const checkProxy = async (p, ret = 0) => {
+			if (!p) return;
 
-				if (p) { checkProxy(p, ret); if (!ret) last = +new Date(); }
-				else { return threads--; }
-			});
+			const agent = getAgentFromURI(p, 10000);
+			const res = await axios({
+				method: 'get',
+				url: 'https://discordapp.com/api/v9/experiments',
+				httpAgent: agent,
+				httpsAgent: agent,
+				timeout: 10000,
+				validateStatus: null,
+			}).catch(err => ({ err }));
+
+			const is_valid = typeof res?.data?.fingerprint === 'string';
+			if (is_valid) {
+				if (keep_transparent) {
+					checked.push(p);
+				}
+				else {
+					const proxy_ip = await getIP(agent);
+					if (proxy_ip !== og_ip) checked.push(p);
+				}
+			}
+
+			if ((!res?.err && !is_valid) || is_valid || ret >= maxRetries) {
+				p = proxies.shift();
+				ret = 0;
+			}
+			else { ret++; }
+
+			if (!p) return --threads;
+
+			if (ret == 0) last = +new Date();
+			return checkProxy(p, ret);
 		};
 
 		const log = () => {
-			if (silent) return;
-			let eta = (((proxies.length + threads) * maxRetries * 10000) / threads) - (+new Date() - last);
+			let eta = (((proxies.length + threads) * (maxRetries + 1) * 10000) / threads) - (+new Date() - last);
 			if (!eta || eta < 10000) eta = '< 10 seconds';
 			else eta = '~' + ms(eta, { long: true });
 
@@ -45,8 +62,7 @@ module.exports = async (proxies, threads, silent = false) => {
 			return;
 		};
 
-		const checked = [];
-		for (let i = 0; i < threads; i++) {
+		for (let i = 0; i < Math.min(threads, proxies.length); i++) {
 			checkProxy(proxies.shift(), 0);
 		}
 
@@ -55,8 +71,8 @@ module.exports = async (proxies, threads, silent = false) => {
 				clearInterval(done);
 				complete(checked);
 			}
-			log();
-		}, 100);
+			else if (!silent) { log(); }
+		}, 500);
 	});
 
 	validateProxies(proxies);
