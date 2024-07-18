@@ -23,9 +23,12 @@ proxies:
   # The maximum amount of proxies to download (if enabled), use '0' for no maximum.
   max_proxies_download: 1000
 
+  # Wether or not to keep transparent proxies in the checker (true / false).
+  keep_transparent: true
+
 # The amount of codes to check at the same time
 # The higher, the faster, but it may slow the generator down if it is set too high
-threads: 50
+threads: 100
 
 # Receive webhook messages on start and when a valid code is found
 webhook:
