@@ -39,8 +39,6 @@ const oldWorking = loadProxies('./working_proxies.txt');
 
 let proxies = [...new Set(http_proxies.concat(socks_proxies, oldWorking))];
 
-// process.on('uncaughtException', () => { });
-// process.on('unhandledRejection', (e) => { console.error(e); stats.threads > 0 ? stats.threads-- : 0; });
 process.on('SIGINT', () => { process.exit(0); });
 process.on('exit', () => { logger.info('Closing YANG... If you liked this project, make sure to leave it a star on github: https://github.com/Tenclea/ReYANG ! <3'); checkForUpdates(); });
 
