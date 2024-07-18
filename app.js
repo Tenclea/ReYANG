@@ -1,11 +1,10 @@
 const
+	{ default: axios } = require('axios'),
 	chalk = require('chalk'),
 	logger = require('./utils/logger'),
 	ms = require('ms'),
-	needle = require('needle'),
-	{ checkToken, checkForUpdates, loadProxies, redeemNitro, sendWebhook } = require('./utils/functions'),
+	{ checkToken, checkForUpdates, loadProxies, redeemNitro, sendWebhook, getAgentFromURI } = require('./utils/functions'),
 	{ existsSync, readFileSync, watchFile, writeFileSync } = require('fs'),
-	ProxyAgent = require('proxy-agent'),
 	yaml = require('js-yaml');
 
 const stats = { threads: 0, startTime: 0, used_codes: [], version: require('./package.json').version, working: 0 };
@@ -40,8 +39,8 @@ const oldWorking = loadProxies('./working_proxies.txt');
 
 let proxies = [...new Set(http_proxies.concat(socks_proxies, oldWorking))];
 
-process.on('uncaughtException', () => { });
-process.on('unhandledRejection', (e) => { console.error(e); stats.threads > 0 ? stats.threads-- : 0; });
+// process.on('uncaughtException', () => { });
+// process.on('unhandledRejection', (e) => { console.error(e); stats.threads > 0 ? stats.threads-- : 0; });
 process.on('SIGINT', () => { process.exit(0); });
 process.on('exit', () => { logger.info('Closing YANG... If you liked this project, make sure to leave it a star on github: https://github.com/Tenclea/ReYANG ! <3'); checkForUpdates(); });
 
@@ -61,7 +60,7 @@ process.on('exit', () => { logger.info('Closing YANG... If you liked this projec
 
 	if (!proxies[0]) { logger.error('Could not find any valid proxies. Please make sure to add some in the \'required\' folder.'); process.exit(1); }
 
-	if (config.proxies.enable_checker) proxies = await require('./utils/proxy-checker')(proxies, config.threads);
+	if (config.proxies.enable_checker) proxies = await require('./utils/proxy-checker')(proxies, config.threads, config.proxies.keep_transparent);
 	if (!proxies[0]) { logger.error('All of your proxies were filtered out by the proxy checker. Please add some fresh ones in the \'required\' folder.'); process.exit(1); }
 
 	logger.info(`Loaded ${chalk.yellow(proxies.length)} proxies.`);
@@ -77,74 +76,75 @@ process.on('exit', () => { logger.info('Closing YANG... If you liked this projec
 		logStats();
 		if (!proxy) { stats.threads > 0 ? stats.threads-- : 0; return; }
 
-		const agent = new ProxyAgent(proxy); agent.timeout = 5000;
-		needle.get(
-			`https://discord.com/api/v9/entitlements/gift-codes/${code}?with_application=false&with_subscription_plan=true`,
-			{
-				agent: agent,
-				follow: 10,
-				open_timeout: 10000,
-				response_timeout: 10000,
-				read_timeout: 10000,
-				rejectUnauthorized: false,
-			},
-			(err, res, body) => {
-				if (!body?.message && !body?.subscription_plan) {
-					let timeout = 0;
-					if (retries < 100) {
-						retries++; timeout = 2500;
-						logger.debug(`Connection to ${chalk.grey(proxy)} failed : ${chalk.red(res?.statusCode || err.message || 'INVALID RESPONSE')}.`);
-					}
-					else {
-						// proxies.push(proxy); // don't remove proxy
-						logger.debug(`Removed ${chalk.gray(proxy)} : ${chalk.red(res?.statusCode || err.message || 'INVALID RESPONSE')}`);
-						proxy = proxies.shift();
-					}
+		const agent = getAgentFromURI(proxy);
+		const res = await axios({
+			method: 'get',
+			url: `https://discord.com/api/v9/entitlements/gift-codes/${code}?with_application=false&with_subscription_plan=true`,
+			httpsAgent: agent,
+			timeout: 10000,
+			validateStatus: null,
+		}).catch(err => (err));
 
-					logStats();
-					return setTimeout(() => { checkCode(generateCode(), proxy, retries); }, timeout);
-				}
+		const body = res.data;
+		if (!body?.message && !body?.subscription_plan) {
+			let timeout = 0;
+			if (retries < 25) {
+				retries++; timeout = 2500;
+				logger.debug(`Connection to ${chalk.grey(proxy)} failed : ${chalk.red(res?.status || res?.err?.message || 'INVALID RESPONSE')}.`);
+			}
+			else {
+				// proxies.push(proxy); // don't remove proxy
+				logger.debug(`Removed ${chalk.gray(proxy)} : ${chalk.red(res?.status || res?.err?.message || 'INVALID RESPONSE')}`);
+				proxy = proxies.shift();
+			}
 
-				retries = 0; let p = proxy;
-				stats.used_codes.push(code);
-				if (!working_proxies.includes(proxy)) working_proxies.push(proxy);
+			logStats();
+			return setTimeout(() => { checkCode(generateCode(), proxy, retries); }, timeout);
+		}
 
-				if (body.subscription_plan) {
-					logger.info(`Found a valid gift code : https://discord.gift/${code} !`);
+		retries = 0;
+		stats.used_codes.push(code);
+		if (!working_proxies.includes(proxy)) working_proxies.push(proxy);
 
-					// Try to redeem the code if possible
-					redeemNitro(code, config);
+		let p = proxy;
+		if (body.subscription_plan) {
+			logger.info(`Found a valid gift code : https://discord.gift/${code} !`);
 
-					if (config.webhook.enabled && config.webhook.notifications.valid_code) {
-						sendWebhook(config.webhook.url, `@everyone Found a \`${body.subscription_plan.name}\` gift code in \`${ms(+new Date() - stats.startTime, { long: true })}\` : https://discord.gift/${code}.`);
-					}
+			// Try to redeem the code if possible
+			redeemNitro(code, config);
 
-					// Write working code to file
-					let codes = existsSync('./valid_codes.txt') ? readFileSync('./valid_codes.txt', 'utf-8') : '';
-					codes += `${new Date().toLocaleString()}: ${body?.subscription_plan || '???'} - https://discord.gift/${code}\n`;
-					writeFileSync('./valid_codes.txt', codes, 'utf-8');
+			if (config.webhook.enabled && config.webhook.notifications.valid_code) {
+				sendWebhook(config.webhook.url, `@everyone Found a \`${body.subscription_plan.name}\` gift code in \`${ms(+new Date() - stats.startTime, { long: true })}\` : https://discord.gift/${code}.`);
+			}
 
-					stats.working++;
-				}
-				else if (res.statusCode == 429) {
-					// timeouts equal to 600000 are frozen. Most likely a ban from Discord's side.
-					const timeout = body.retry_after;
-					if (timeout != 600000) {
-						proxies.push(proxy);
-						logger.warn(`${chalk.gray(proxy)} is being rate limited (${(timeout).toFixed(2)}s), ${proxies[0] === proxy ? 'waiting' : 'skipping proxy'}...`);
-					}
-					else {
-						logger.warn(`${chalk.gray(proxy)} was most likely banned by Discord. Removing proxy...`);
-					}
-					p = proxies.shift();
-				}
-				else if (body.message === 'Unknown Gift Code') {
-					logger.warn(`${code} was an invalid gift code.`);
-				}
-				else { console.log(body?.message + ' - please report this on GitHub.'); }
-				logStats();
-				return setTimeout(() => { checkCode(generateCode(), p); }, p === proxy ? (body.retry_after * 1000 || 1000) : 0);
-			});
+			// Write working code to file
+			let codes = existsSync('./valid_codes.txt') ? readFileSync('./valid_codes.txt', 'utf-8') : '';
+			codes += `${new Date().toLocaleString()}: ${body?.subscription_plan || '???'} - https://discord.gift/${code}\n`;
+			writeFileSync('./valid_codes.txt', codes, 'utf-8');
+
+			stats.working++;
+		}
+		else if (res.status == 429) {
+			// timeouts equal to 600000 are frozen. Most likely a ban from Discord's side.
+			const timeout = body.retry_after;
+			if (timeout != 600000) {
+				proxies.push(proxy);
+				logger.warn(`${chalk.gray(proxy)} is being rate limited (${(timeout).toFixed(2)}s), ${proxies[0] === proxy ? 'waiting' : 'skipping proxy'}...`);
+			}
+			else {
+				logger.warn(`${chalk.gray(proxy)} was most likely banned by Discord. Removing proxy...`);
+			}
+			p = proxies.shift();
+		}
+		else if (body.message === 'Unknown Gift Code') {
+			logger.warn(`${code} was an invalid gift code.`);
+		}
+		else {
+			console.log(body?.message + ' - please report this on GitHub.');
+		}
+
+		logStats();
+		return setTimeout(() => checkCode(generateCode(), p), p === proxy ? (body.retry_after * 1000 || 1000) : 0);
 	};
 
 	const logStats = () => {
@@ -205,14 +205,13 @@ process.on('exit', () => { logger.info('Closing YANG... If you liked this projec
 		const new_socks_proxies = loadProxies('./required/socks-proxies.txt', 'socks');
 		const newProxies = [...new Set(new_http_proxies.concat(new_socks_proxies, await require('./utils/proxy-scrapper')()))];
 
-		const checked = await require('./utils/proxy-checker')(newProxies, config.threads, true);
-
-		proxies = proxies.concat(checked);
+		const checked = await require('./utils/proxy-checker')(newProxies, config.threads, config.proxies.keep_transparent, true);
+		proxies.push(...checked);
 
 		logger.info(`Added ${checked.length} proxies.`);
 		startThreads(config.threads - stats.threads);
 		addingProxies = false;
-	}, 60 * 60 * 1000);
+	}, 15 * 60 * 1000);
 
 	// Webhook status update
 	if (+config.webhook.notifications.status_update_interval != 0) {
@@ -220,7 +219,6 @@ process.on('exit', () => { logger.info('Closing YANG... If you liked this projec
 			const attempts = stats.used_codes.length;
 			const aps = attempts / ((+new Date() - stats.startTime) / 1000) * 60 || 0;
 			sendWebhook(config.webhook.url, `Proxies: \`${proxies.length + stats.threads}\` | Attempts: \`${attempts}\` (~\`${aps.toFixed(1)}\`/min) | Working Codes: \`${stats.working}\``);
-			return;
 		}, config.webhook.notifications.status_update_interval * 1000);
 	}
 })();
